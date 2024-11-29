@@ -1,0 +1,320 @@
+<div id="task-app" style="max-width: 500px; margin: 0 auto; font-family: Arial, sans-serif;">
+    <!-- Task Input Area -->
+    <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
+        <input type="text" id="task-input" placeholder="Add a new task" 
+            style="flex: 1; padding: 10px; border: none; border-radius: 4px; 
+            background-color: #2C2F33; color: #ffffff; outline: none;">
+        <span id="microphone-icon" 
+            style="padding: 10px; background-color: transparent; border-radius: 4px; 
+            color: #ffffff; cursor: pointer; display: flex; align-items: center; 
+            justify-content: center; font-size: 18px;">🎤</span>
+        <button id="add-task-button" 
+            style="padding: 10px 16px; background-color: #5865F2; border: none; 
+            border-radius: 4px; color: #ffffff; cursor: pointer;">Add</button>
+    </div>
+  
+    <!-- Task List -->
+    <ul id="task-list" style="list-style-type: none; padding: 0; background-color: #23272A; border-radius: 4px; padding: 12px; max-height: 300px; overflow-y: auto;"></ul>
+  
+    <!-- Play Button -->
+    <button id="play-button" onclick="playTasks()" style="padding: 16px 32px; background-color: #F04747; border: none; border-radius: 4px; color: #ffffff; cursor: pointer; margin-top: 16px; font-size: 24px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);">Play (0)</button>
+  
+    <!-- Timer Popup Window -->
+    <div id="timer-window" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #2C2F33; color: #ffffff; text-align: center; padding: 16px;">
+      <button onclick="backToTasks()" id="back-button" style="position: absolute; top: 16px; left: 16px; background: none; border: none; color: #ffffff; font-size: 24px; cursor: pointer;">←</button>
+      <h2 id="current-task-title" style="margin-top: 40px; text-align: center;"></h2>
+      <svg id="timer-circle" viewBox="0 0 100 100" width="80vw" height="80vw" style="margin-top: 16px; margin-left: auto; margin-right: auto;">
+        <circle cx="50" cy="50" r="45" stroke="#5865F2" stroke-width="5" fill="none" />
+        <circle id="progress-circle" cx="50" cy="50" r="45" stroke="#99AAB5" stroke-width="5" fill="none" stroke-dasharray="282.743" stroke-dashoffset="0" style="transform: rotate(-90deg); transform-origin: center;" />
+      </svg>
+      <div id="countdown-timer" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px;">00:00</div>
+      <div style="position: absolute; bottom: 10%; width: 100%; text-align: center;">
+        <button id="pause-button" onclick="togglePause()" style="padding: 8px 16px; background-color: #5865F2; border: none; border-radius: 4px; color: #ffffff; cursor: pointer; margin-right: 16px;">Pause</button>
+        <button onclick="stopTimer()" style="padding: 8px 16px; background-color: #99AAB5; border: none; border-radius: 4px; color: #ffffff; cursor: pointer;">Stop</button>
+      </div>
+    </div>
+  
+    <!-- Task Edit Modal -->
+    <div id="edit-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #2C2F33; padding: 16px; border-radius: 4px; color: #ffffff; width: 300px;">
+      <h3>Edit Task</h3>
+      <label for="edit-title">Title:</label>
+      <input type="text" id="edit-title" style="width: 100%; margin-bottom: 8px; padding: 8px; border: none; border-radius: 4px; background-color: #23272A; color: #ffffff;">
+      <label for="edit-duration">Duration (seconds):</label>
+      <input type="number" id="edit-duration" style="width: 100%; margin-bottom: 8px; padding: 8px; border: none; border-radius: 4px; background-color: #23272A; color: #ffffff;">
+      <button onclick="saveTaskEdit()" style="padding: 8px 16px; background-color: #5865F2; border: none; border-radius: 4px; color: #ffffff; cursor: pointer;">Save</button>
+      <button onclick="closeEditModal()" style="padding: 8px 16px; background-color: #99AAB5; border: none; border-radius: 4px; color: #ffffff; cursor: pointer; margin-top: 8px;">Cancel</button>
+    </div>
+  </div>
+  
+  <script>
+    let tasks = [];
+    let currentTaskIndex = 0;
+    let countdownInterval;
+    let isPaused = false;
+    let remainingTime = 0;
+    let totalTime = 0;
+    const soundUrl = 'https://cdn.freesound.org/previews/242/242501_4414128-lq.mp3';
+    const sound = new Audio(soundUrl);
+    
+    const apiKey = 'AIzaSyDvH0ahJAJLu4hS7qiIB1PhuMHFmg21km4'; // Replace with your actual API key
+    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+
+    const apiResponse = [];
+
+    document.getElementById('microphone-icon').addEventListener('click', () => {
+        const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.lang = "it-IT,en-US";
+        recognition.interimResults = false;
+        
+        console.log("Microphone clicked!");
+
+        recognition.onresult = async (event) => {
+            const transcript = event.results[0][0].transcript;
+            const detectedLang = recognition.lang.startsWith('it') ? 'Italian' : 'English';
+
+            console.log(`Recognized speech: ${transcript}`);
+
+            const languagePrompt = `Extract only the explicit actionable tasks from the following phrase. Return each task in a concise imperative form without any punctuation other than newline, in ${detectedLang}:\n"${transcript}"`;
+            const requestBody = {
+                contents: [{ parts: [{ text: languagePrompt }] }]
+            };
+
+            console.log('Request Body:', requestBody);
+
+            try {
+                const response = await fetch(`${endpoint}?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody),
+                });
+
+                if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+
+                const apiResponse = await response.json();
+                console.log('Raw API Response:', apiResponse);
+
+                const tasksFromGeminiText = apiResponse.candidates[0].content.parts[0].text || [];
+                const tasksFromGemini = tasksFromGeminiText.split('\n').filter(task => task.trim() !== ''); // Split by line and remove empty lines
+
+
+                tasksFromGemini.forEach(task => {
+                    const cleanedTask = task.trim()
+                        .replace(/^\* /, '') // Remove leading asterisk
+                        .replace(/\.$/, ''); // Remove trailing period
+                    const capitalizedTask = cleanedTask.charAt(0).toUpperCase() + cleanedTask.slice(1); // Capitalize first letter
+                    tasks.push({ title: capitalizedTask, duration: 4, isCompleted: false });
+                });
+
+                renderTasks();  // Re-render tasks after adding
+                updatePlayButton();
+            } catch (error) {
+                console.error('Error fetching from Gemini API:', error);
+            }
+        };
+
+        recognition.onerror = (event) => console.error("Speech recognition error:", event.error);
+
+        console.log("Starting recognition...");
+        recognition.start();
+        console.log("Recognition started.");
+    });
+        
+    // Function to add a new task
+    function addTask() {
+      const taskInput = document.getElementById('task-input');
+      const taskText = taskInput.value.trim();
+      if (taskText === '') return;
+  
+      tasks.push({ title: taskText, duration: 4, isCompleted: false });
+      renderTasks();
+      taskInput.value = '';
+      updatePlayButton();
+    }
+
+    function extractTasks(apiResponse) {
+      // Access the content field in the first candidate's first part
+      const rawContent = apiResponse.candidates[0]?.content?.parts?.[0]?.text || '';
+      
+      // Split tasks by newline and remove empty entries
+      const extractedTasks = rawContent.split('\n').filter(task => task.trim() !== '').map(line => ({
+          title: line.trim(),
+          duration: 4 // Example duration
+      }));
+      
+      console.log('Extracted Tasks:', extractedTasks); // Debugging
+      return extractedTasks;
+    }
+
+    // Function to render tasks
+    function renderTasks() {
+      const taskList = document.getElementById('task-list');
+      taskList.innerHTML = '';
+  
+      tasks.forEach((task, index) => {
+        const taskItem = document.createElement('li');
+        taskItem.style.display = 'flex';
+        taskItem.style.alignItems = 'center';
+        taskItem.style.justifyContent = 'space-between';
+        taskItem.style.padding = '8px';
+        taskItem.style.marginBottom = '8px';
+        taskItem.style.backgroundColor = '#2C2F33';
+        taskItem.style.borderRadius = '4px';
+        taskItem.style.color = task.isCompleted ? '#99AAB5' : '#ffffff';
+        taskItem.style.textDecoration = task.isCompleted ? 'line-through' : 'none';
+  
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.style.marginRight = '8px';
+        checkbox.checked = task.isCompleted;
+        checkbox.onchange = function () {
+          tasks[index].isCompleted = this.checked;
+          renderTasks();
+          updatePlayButton();
+        };
+  
+        const taskLabel = document.createElement('span');
+        taskLabel.textContent = `${task.title} - ${task.duration} sec`;
+        taskLabel.style.cursor = 'pointer';
+        taskLabel.onclick = () => openEditModal(index);
+  
+        const taskContent = document.createElement('div');
+        taskContent.style.display = 'flex';
+        taskContent.style.alignItems = 'center';
+        taskContent.appendChild(checkbox);
+        taskContent.appendChild(taskLabel);
+  
+        taskItem.appendChild(taskContent);
+        taskList.appendChild(taskItem);
+      });
+    }
+  
+    // Function to start the task sequence and play all uncompleted tasks until done
+    function playTasks() {
+      // If there are incomplete tasks, start the sequence
+      const incompleteTasks = tasks.filter(task => !task.isCompleted);
+      
+      if (incompleteTasks.length > 0) {
+        // Start the first incomplete task
+        currentTaskIndex = tasks.indexOf(incompleteTasks[0]);
+        startTimer(incompleteTasks[0].duration, incompleteTasks[0].title);
+      }
+    }
+    // Function to start the timer for a task
+    function startTimer(seconds, title) {
+      const timerWindow = document.getElementById('timer-window');
+      const countdownTimer = document.getElementById('countdown-timer');
+      const timerTitle = document.getElementById('current-task-title');
+      const progressCircle = document.getElementById('progress-circle');
+
+      // Show the timer window when the task starts
+      timerWindow.style.display = 'block';
+      timerTitle.textContent = title;
+
+      remainingTime = seconds;
+      totalTime = seconds;
+
+      progressCircle.style.strokeDashoffset = 282.743;  // Reset the progress
+
+      // Smooth update: update every 50ms for smoother progress
+      countdownInterval = setInterval(() => {
+        if (isPaused) return;
+
+        remainingTime -= 0.05;  // Reduce the time by a small fraction
+
+        const minutes = Math.floor(remainingTime / 60);
+        const seconds = Math.floor(remainingTime % 60);
+        countdownTimer.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+
+        const offset = (remainingTime / totalTime) * 282.743;
+        progressCircle.style.strokeDashoffset = offset;
+
+        if (remainingTime <= 0) {
+          clearInterval(countdownInterval);
+          countdownTimer.textContent = '00:00';
+          
+          // Play the sound after each task is completed
+          sound.play();
+
+          // Mark the current task as completed
+          tasks[currentTaskIndex].isCompleted = true;
+
+          // Update the task list and play button immediately
+          renderTasks();
+          updatePlayButton();
+
+          // Move to the next task in the sequence
+          const remainingTasks = tasks.filter(task => !task.isCompleted);
+
+          if (remainingTasks.length > 0) {
+            // Start the next task automatically
+            const nextTask = remainingTasks[0]; // Start the next incomplete task
+            currentTaskIndex = tasks.indexOf(nextTask); // Find its index
+            startTimer(nextTask.duration, nextTask.title);
+          } else {
+            // Once all tasks are completed, return to the task list view
+            backToTasks();  // No tasks left, go back to the task list view
+          }
+        }
+      }, 50);
+    }
+
+  
+    function updatePlayButton() {
+      const playButton = document.getElementById('play-button');
+      const incompleteTasks = tasks.filter(task => !task.isCompleted);
+      const totalTime = incompleteTasks.reduce((sum, task) => sum + task.duration, 0);
+      playButton.textContent = `Play (${totalTime < 60 ? totalTime : Math.floor(totalTime / 60)}${totalTime < 60 ? ' sec' : ' min'})`;
+    }
+  
+    function togglePause() {
+      isPaused = !isPaused;
+      const pauseButton = document.getElementById('pause-button');
+      pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
+    }
+  
+    function stopTimer() {
+      clearInterval(countdownInterval);
+      const timerWindow = document.getElementById('timer-window');
+      timerWindow.style.display = 'none';
+      currentTaskIndex++;
+      if (currentTaskIndex < tasks.length) {
+        startTimer(tasks[currentTaskIndex].duration, tasks[currentTaskIndex].title);
+      }
+    }
+  
+    function backToTasks() {
+      const timerWindow = document.getElementById('timer-window');
+      timerWindow.style.display = 'none';
+      renderTasks();
+      updatePlayButton();
+    }
+  
+    function openEditModal(index) {
+      const task = tasks[index];
+      const editModal = document.getElementById('edit-modal');
+      document.getElementById('edit-title').value = task.title;
+      document.getElementById('edit-duration').value = task.duration;
+      editModal.style.display = 'block';
+      currentTaskIndex = index;
+    }
+  
+    function closeEditModal() {
+      const editModal = document.getElementById('edit-modal');
+      editModal.style.display = 'none';
+    }
+  
+    function saveTaskEdit() {
+      const title = document.getElementById('edit-title').value.trim();
+      const duration = parseInt(document.getElementById('edit-duration').value, 10);
+      if (title !== '') {
+        tasks[currentTaskIndex].title = title;
+        tasks[currentTaskIndex].duration = duration;
+        renderTasks();
+        closeEditModal();
+        updatePlayButton();
+      }
+    }
+  
+    document.getElementById('add-task-button').onclick = addTask;
+  </script>
+  
